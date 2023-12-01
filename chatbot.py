@@ -5,6 +5,7 @@ from langchain.chat_models import AzureChatOpenAI
 from langchain.chains.conversation.memory import (
     ConversationBufferMemory,
     ConversationSummaryBufferMemory,
+    ConversationSummaryMemory
 )
 from langchain_experimental.sql import SQLDatabaseChain
 from langchain.utilities import SQLDatabase
@@ -113,13 +114,13 @@ Thought:
             max_tokens=1000,
         )
         # self.memory = ConversationBufferMemory(input_key="question", memory_key="context")
-        self.memory = ConversationSummaryBufferMemory(
+        self.memory = ConversationSummaryMemory(
             llm=self.llm3, input_key="input", memory_key="history"
         )
         # self.qa_chain = load_qa_with_sources_chain(
         #     llm=self.llm, chain_type="stuff", prompt=PromptTemplate.from_template(self.chat_template))
-        # self.keywordChain = LLMChain(
-        #     llm=self.llm3, prompt=PromptTemplate.from_template(self.keyword_templ))
+        self.keywordChain = LLMChain(
+            llm=self.llm3, prompt=PromptTemplate.from_template(self.keyword_templ))
         # self.qaChain = LLMChain(
         #     llm=self.llm3, prompt=PromptTemplate.from_template(self.chat_template), memory = self.memory)
         self.qaChain = create_sql_agent(
@@ -130,6 +131,7 @@ Thought:
             input_variables=["input", "agent_scratchpad", "history"],
             suffix=self.suffix,  # must have history as variable,
             agent_executor_kwargs={"memory": self.memory},
+            handle_parsing_errors=True,
         )
 
     def chat_public(self, query):
