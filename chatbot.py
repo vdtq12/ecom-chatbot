@@ -60,9 +60,8 @@ Search query:
 Assistant helps the online website with their questions about the BKTechStore website which sells computer and related devices. Your answer must adhere to the following criteria:
 You MUST follow this rule:
 - If question is in English, answer in English. If question is in Vietnamese, answer in Vietnamese. 
+- If the user greets you, respond accordingly and tell user about yourself without query anything from given database.
 - Be friendly in your answers. You may use the provided sources to help answer the question. If there isn't enough information, say you don't know. If asking a clarifying question to the user would help, ask the question.
-- If the user greets you, respond accordingly and tell user about yourself.
-- You were given a database. Please answer all relevant information if user ask about electronic gadgets product with this database.
 - You do not need to query database if question of the user not relevant to electronic gadgets.
 <|im_end|>
 
@@ -76,10 +75,11 @@ Use pcs table with name as the table primary key.
 Do not use other table.
 
 Question: {input}
-Thought: I should look at the tables which is allowed in the database to see what I can query.  Then I should query the schema of the most relevant tables.
-Thought: If no suitable product satisfy the answer, just answer no suitable product.
-Thought: 
-
+Thought: I was given a database. I will answer all relevant information if user ask about electronic gadgets product with this database.
+Though: if user do not required me finding products, I do not query database.
+Thought: if user ask about electronic gadgets, I should look at the tables which is allowed in the database to see what I can query.  Then I should query the schema of the most relevant tables.
+Thought: If no suitable product satisfy the answer, I will answer no suitable product.
+Thought: if answer was not a block of text, I convert it to block of text before parse out. 
 {agent_scratchpad}
 """
 
@@ -124,6 +124,7 @@ Thought:
         # self.qaChain = LLMChain(
         #     llm=self.llm3, prompt=PromptTemplate.from_template(self.chat_template), memory = self.memory)
         self.qaChain = create_sql_agent(
+            handle_parsing_errors=True,
             llm=self.llm3,
             toolkit=SQLDatabaseToolkit(db=self.db, llm=self.llm3),
             verbose=True,
@@ -131,15 +132,24 @@ Thought:
             input_variables=["input", "agent_scratchpad", "history"],
             suffix=self.suffix,  # must have history as variable,
             agent_executor_kwargs={"memory": self.memory},
-            handle_parsing_errors=True,
         )
 
     def chat_public(self, query):
         # result = self.qaChain(
         #     {"summaries": "", "input": query, "history": "", "user_info": ""}
         # )["text"]
-        result = self.qaChain(
-            {"summaries": "", "input": query, "history": "", "user_info": ""}
-        )["output"]
-        print("result: ", result)
+        if not query.endswith("."):
+            query += "."
+
+        result=""
+        try:
+            result = self.qaChain(
+                {"summaries": "", "input": query, "history": "", "user_info": ""}
+            )["output"]
+        except Exception as e:
+            response = str(e)
+            if "An output parsing error occurred" in response:
+                print("into result")
+                result = response.removeprefix("An output parsing error occurred. In order to pass this error back to the agent and have it try again, pass `handle_parsing_errors=True` to the AgentExecutor. This is the error: Could not parse LLM output: `").removesuffix("`")
+    
         return result
