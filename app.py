@@ -1,8 +1,8 @@
 from flask import Flask, render_template, request, jsonify
 
-from chatbot import chatbot
+from test1 import chatbot
 from dotenv import load_dotenv
-import py_eureka_client.eureka_client as eureka_client
+# import py_eureka_client.eureka_client as eureka_client
 
 load_dotenv()
 bot = chatbot()
@@ -11,11 +11,11 @@ bot = chatbot()
 app = Flask(__name__)
 app.config.from_pyfile("settings.py")
 
-eureka_client.init(
-    eureka_server=app.config["EUREKA_SERVICE"],
-    app_name=app.config["EUREKA_INSTANCE_NAME"],
-    instance_port=app.config["PORT"],
-)
+# eureka_client.init(
+#     eureka_server=app.config["EUREKA_SERVICE"],
+#     app_name=app.config["EUREKA_INSTANCE_NAME"],
+#     instance_port=app.config["PORT"],
+# )
 
 
 @app.route("/")
