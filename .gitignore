@@ -3,3 +3,4 @@ config.py
 dbTest.py
 dbTest2.py
 .env
+tests/

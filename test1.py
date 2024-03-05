@@ -43,9 +43,15 @@ from langchain.agents import AgentExecutor
 from langchain.utilities import SQLDatabase
 from langchain.retrievers import BM25Retriever
 from langchain.schema import Document
-from langchain.agents.agent_toolkits import create_sql_agent, SQLDatabaseToolkit
+from langchain.agents.agent_toolkits import (
+    create_sql_agent,
+    SQLDatabaseToolkit,
+    create_csv_agent,
+)
 from langchain.agents.agent_types import AgentType
 from langchain.document_loaders import PyPDFLoader
+import pandas as pd
+import regex as re
 
 # db = SQLDatabase.from_uri("postgresql://trstaikn:x7EKrFNMiv0m1zs03b-QZPRXwG3dd0S_@rosie.db.elephantsql.com/trstaikn")
 
@@ -71,7 +77,15 @@ class Info(BaseModel):
 class CustomerInput(BaseModel):
     """The question or the query of the customer"""
 
-    query: str = Field(description="the question or the query of the customer")
+    query: str = Field(
+        description="the question or the query of the customer, must include as much information as possible"
+    )
+
+
+class Software(BaseModel):
+    """The name of the software that customer mentioned"""
+
+    name: str = Field(description="software name")
 
 
 text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
@@ -84,9 +98,9 @@ def flatten(matrix):
     return flat_list
 
 
-@tool(args_schema=CustomerInput)
-def search_system_requirements(query: CustomerInput):
-    """Search system requirements of an application (could be game/app/...)"""
+@tool(args_schema=Software)
+def search_system_requirements(name: Software):
+    """Search system requirements of an software (could be game, application, so on)"""
 
     functions = [convert_pydantic_to_openai_function(Info)]
 
@@ -103,12 +117,29 @@ def search_system_requirements(query: CustomerInput):
     {input}"""
     )
 
+    csv_agent = create_csv_agent(
+        llm=ChatOpenAI(
+            engine="gpt-35-turbo-16k",
+        ),
+        path="./static/app_sys_reqs.csv",
+        verbose=True,
+        agent_type=AgentType.OPENAI_FUNCTIONS,
+    )
+
+    answer = csv_agent.run(f"What is the url of {name} ?  ONLY answer the url, no more words. If can not find any suitable url, just answer you do not know, no more words.")
+
+    craw_url = (
+        re.search("(?P<url>https?://[^\s]+)", answer).group("url")
+        if re.search("(?P<url>https?://[^\s]+)", answer)
+        else None
+    )
+    if not craw_url:
+        return "No information was found!"
+
     extraction_model = ChatOpenAI(
         engine="gpt-35-turbo-16k",  # engine = "deployment_name"
     ).bind(functions=functions, function_call={"name": "Info"})
-    loader = WebBaseLoader(
-        "https://www.designmaster.biz/support/autocad-system-requiremen.html"
-    )
+    loader = WebBaseLoader(craw_url)
     documents = loader.load()
     doc = documents[0]
     splits = text_splitter.split_text(doc.page_content)
@@ -182,7 +213,7 @@ def search_system_requirements(query: CustomerInput):
     choice_chain = choice_prompt | choice_model
     new_list = [{"system info": d} for d in result]
     info = "".join(str(item) for item in new_list)
-    res = choice_chain.invoke({"customer_input": query, "info": info})
+    res = choice_chain.invoke({"customer_input": """system requirements of {name}""", "info": info})
     print("\n---2", res)
 
     return res
@@ -208,11 +239,12 @@ def answer_about_yourself(query: CustomerInput):
     res = qa_chain.invoke({"input": query})
     return res
 
+
 @tool(args_schema=CustomerInput)
 def answer_about_bktechstore(query: CustomerInput):
     """Answer customer question about information of the BKTechStore policies such as business information, privacy, transaction term, online shopping guide, warranty policy, contact information, payment methods."""
-    
-    loader = PyPDFLoader('./static/chatbotref.pdf')
+
+    loader = PyPDFLoader("./static/chatbotref.pdf")
     docs = loader.load_and_split()
 
     doc_list = [doc.page_content for doc in docs]
@@ -224,8 +256,8 @@ def answer_about_bktechstore(query: CustomerInput):
 
     policies_info = [x.page_content for x in result]
 
-    print('\n--- result: ', result)
-    print('\n--- policy info: ', policies_info)
+    print("\n--- result: ", result)
+    print("\n--- policy info: ", policies_info)
 
     policy_model = ChatOpenAI(engine="gpt-35-turbo-16k")
     policy_prompt = PromptTemplate.from_template(
@@ -244,6 +276,7 @@ def answer_about_bktechstore(query: CustomerInput):
     policy_chain = policy_prompt | policy_model | OpenAIFunctionsAgentOutputParser()
     res = policy_chain.invoke({"input": query, "information": policies_info})
     return res
+
 
 # @tool(args_schema=CustomerInput)
 # def find_product(query: CustomerInput):
@@ -265,40 +298,25 @@ def answer_about_bktechstore(query: CustomerInput):
 
 #     result = chain1.run("""Join the product table and product_line table and exclude 2 attribute / column: images, description. (join by product_line of product table and product_id of product_line table).
 #                         From the join result, answer user question.
-                        
+
 #                         User question: {query}.""")
-    
+
 #     return result
 
 
 tools_functions = [
     format_tool_to_openai_function(f)
-    for f in [answer_about_yourself, search_system_requirements, answer_about_bktechstore]
+    for f in [
+        answer_about_yourself,
+        search_system_requirements,
+        answer_about_bktechstore,
+    ]
 ]
-
 
 
 tools_model = ChatOpenAI(
     engine="gpt-35-turbo-16k",  # engine = "deployment_name"
 ).bind(functions=tools_functions)
-
-# agent_prompt = PromptTemplate.from_template(
-#     """ You work as an assistant for the BKTechStore website and your role is to respond to customer inquiries.
-#         If a question is not relevant to the website or if there are no matching tools available, you should inform the customer that you are unable to answer their question.
-
-#         Use the following format:
-#         Question: the input question you must answer
-#         Thought: you should always think about what to do
-#         Action: the action to take, should be one of the tool name
-#         Action Input: the input to the action
-#         ... (this Thought/Action/Action Input/Observation can repeat N times)
-#         Thought: I now know the final answer.
-#         Final Answer: the final answer to the original input question
-
-#         Customer's question: {input}.
-
-#         Intermediate step: {agent_scratchpad}."""
-# )
 
 agent_prompt = ChatPromptTemplate.from_messages(
     [
@@ -329,7 +347,7 @@ agent_chain = (
 )
 
 tools = [answer_about_yourself, search_system_requirements, answer_about_bktechstore]
-# agent_executor = AgentExecutor(agent=agent_chain, tools=tools, verbose=True)
+agent_executor = AgentExecutor(agent=agent_chain, tools=tools, verbose=True)
 
 
 # print(
@@ -350,18 +368,24 @@ tools = [answer_about_yourself, search_system_requirements, answer_about_bktechs
 #     " --- \n",
 # )
 
-# print("--- final answer: ", agent_executor({"input": "How long is the warranty period for products at your store?"}))
+# print(
+#     "--- final answer: ",
+#     agent_executor(
+#         {
+#             "input": "i want to buy a laptop to use minecraft. What is the recommend system requirements ?"
+#         }
+#     ),
+# )
+
 
 class chatbot:
     def __init__(self):
-        self.agent_executor = AgentExecutor(agent=agent_chain, tools=tools, verbose=True)
+        self.agent_executor = AgentExecutor(
+            agent=agent_chain, tools=tools, verbose=True
+        )
 
     def chat_public(self, query):
         result = self.agent_executor.invoke({"input": query})
         print("--- result: ", result)
 
         return result["output"]
-
-
-
-
